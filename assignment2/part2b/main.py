@@ -4,13 +4,16 @@ from torchvision import datasets, transforms
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.distributed as dist
 import model as mdl
 import time
+import os
+import argparse
 
 device = "cpu"
 torch.set_num_threads(4)
 
-batch_size = 256 # batch for one node
+batch_size = 64 # batch for one node
 
 NUM_EPOCHS = 1
 
@@ -29,6 +32,8 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
     model.train()
     running_loss = 0.0
 
+    group = dist.new_group([0, 1, 2, 3])
+
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
@@ -38,10 +43,16 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
         loss = criterion(outputs, target)
         loss.backward()
 
+        # sync gradient with allreduce
+        for param in model.parameters():
+            param.grad /= 4
+            dist.all_reduce(param.grad, op=dist.ReduceOp.SUM, group=group, async_op=False)
+
         optimizer.step()
 
         running_loss += loss.item()
         
+        # FIXME: running loss or loss.item()
         if batch_idx % 20 == 0:
             print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
         
@@ -73,6 +84,16 @@ def test_model(model, test_loader, criterion):
             
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--master-ip", type=str, required=True, help="IP address of the master node")
+    parser.add_argument("--num-nodes", type=int, required=True, help="Total number of nodes")
+    parser.add_argument("--rank", type=int, required=True, help="Rank of the current node")
+    args = parser.parse_args()
+
+    # FIXME:ip, port?
+    init_method = f"tcp://{args.master_ip}:6585"
+    dist.init_process_group(backend='gloo', init_method=init_method, rank=args.rank, world_size=args.num_nodes)
+
     normalize = transforms.Normalize(mean=[x/255.0 for x in [125.3, 123.0, 113.9]],
                                 std=[x/255.0 for x in [63.0, 62.1, 66.7]])
     transform_train = transforms.Compose([
@@ -87,10 +108,12 @@ def main():
             normalize])
     training_set = datasets.CIFAR10(root="./data", train=True,
                                                 download=True, transform=transform_train)
+    # use the distributed sampler to distribute the data among workers
+    train_sampler = torch.utils.data.distributed.DistributedSampler(training_set)
     train_loader = torch.utils.data.DataLoader(training_set,
                                                     num_workers=2,
                                                     batch_size=batch_size,
-                                                    sampler=None,
+                                                    sampler=train_sampler,
                                                     shuffle=True,
                                                     pin_memory=True)
     test_set = datasets.CIFAR10(root="./data", train=False,
