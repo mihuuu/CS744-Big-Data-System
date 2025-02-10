@@ -5,13 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import model as mdl
+import time
 
 device = "cpu"
 torch.set_num_threads(4)
 
 batch_size = 256 # batch for one node
 
-NUM_EPOCHS = 10
+NUM_EPOCHS = 1
 
 def train_model(model, train_loader, optimizer, criterion, epoch):
     """
@@ -25,7 +26,7 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
     running_loss = 0.0
 
     for batch_idx, (data, target) in enumerate(train_loader):
-        
+        start_time = time.time()
         data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
@@ -37,9 +38,10 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
         optimizer.step()
 
         running_loss += loss.item()
+        iteration_time = time.time() - start_time
         
         if batch_idx % 20 == 0:
-            print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
+            print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}, Time: {iteration_time:.4f} sec")
 
     return None
 
@@ -98,8 +100,11 @@ def main():
                           momentum=0.9, weight_decay=0.0001)
     
     for epoch in range(NUM_EPOCHS):
+        epoch_start_time = time.time()
         train_model(model, train_loader, optimizer, training_criterion, epoch)
         test_model(model, test_loader, training_criterion)
+        epoch_time = time.time() - epoch_start_time
+        print(f"Epoch {epoch+1} complete time: {epoch_time:.4f} sec")
 
 if __name__ == "__main__":
     main()
