@@ -1,19 +1,18 @@
-import os
 import torch
-import json
-import copy
 import numpy as np
 from torchvision import datasets, transforms
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import logging
-import random
 import model as mdl
+
 device = "cpu"
 torch.set_num_threads(4)
 
 batch_size = 256 # batch for one node
+
+NUM_EPOCHS = 10
+
 def train_model(model, train_loader, optimizer, criterion, epoch):
     """
     model (torch.nn.module): The model created to train
@@ -22,11 +21,25 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
     criterion (nn.CrossEntropyLoss) : Loss function used to train the network
     epoch (int): Current epoch number
     """
+    model.train()
+    running_loss = 0.0
 
-    # remember to exit the train loop at end of the epoch
     for batch_idx, (data, target) in enumerate(train_loader):
-        # Your code goes here!
-        break
+        
+        data, target = data.to(device), target.to(device)
+
+        optimizer.zero_grad()
+        outputs = model(data)
+
+        loss = criterion(outputs, target)
+        loss.backward()
+
+        optimizer.step()
+
+        running_loss += loss.item()
+        
+        if batch_idx%10 == 0:
+            print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
 
     return None
 
@@ -80,13 +93,14 @@ def main():
     training_criterion = torch.nn.CrossEntropyLoss().to(device)
 
     model = mdl.VGG11()
-    model.to(device)
+    model = model.to(device)
     optimizer = optim.SGD(model.parameters(), lr=0.1,
                           momentum=0.9, weight_decay=0.0001)
-    # running training for one epoch
-    for epoch in range(1):
+    
+    for epoch in range(NUM_EPOCHS):
         train_model(model, train_loader, optimizer, training_criterion, epoch)
         test_model(model, test_loader, training_criterion)
 
 if __name__ == "__main__":
     main()
+
