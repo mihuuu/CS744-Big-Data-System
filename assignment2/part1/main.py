@@ -38,7 +38,7 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
 
         running_loss += loss.item()
         
-        if batch_idx%10 == 0:
+        if batch_idx % 20 == 0:
             print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
 
     return None
