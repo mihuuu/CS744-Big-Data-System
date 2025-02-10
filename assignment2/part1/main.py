@@ -13,6 +13,7 @@ torch.set_num_threads(4)
 batch_size = 256 # batch for one node
 
 NUM_EPOCHS = 1
+SEED = 14
 
 def train_model(model, train_loader, optimizer, criterion, epoch):
     """
@@ -112,5 +113,7 @@ def main():
         print(f"Epoch {epoch+1} complete time: {epoch_time:.4f} sec")
 
 if __name__ == "__main__":
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
     main()
 
