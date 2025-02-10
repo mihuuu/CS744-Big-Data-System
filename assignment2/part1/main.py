@@ -26,7 +26,6 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
     running_loss = 0.0
 
     for batch_idx, (data, target) in enumerate(train_loader):
-        start_time = time.time()
         data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
@@ -38,10 +37,16 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
         optimizer.step()
 
         running_loss += loss.item()
-        iteration_time = time.time() - start_time
         
         if batch_idx % 20 == 0:
-            print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}, Time: {iteration_time:.4f} sec")
+            print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
+        
+        if batch_idx == 0:
+            start_time = time.time()
+        if batch_idx == 39:
+            end_time = time.time()
+            avg_time = (end_time - start_time) / 39
+            print(f"Average time per iteration after 40 iterations: {avg_time:.4f} sec")
 
     return None
 
