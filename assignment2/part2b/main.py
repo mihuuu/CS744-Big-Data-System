@@ -52,9 +52,8 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
 
         running_loss += loss.item()
         
-        # FIXME: running loss or loss.item()
         if batch_idx % 20 == 0:
-            print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
+            print(f"Epoch {epoch+1} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
         
         if batch_idx == 0:
             start_time = time.time()
@@ -90,7 +89,6 @@ def main():
     parser.add_argument("--rank", type=int, required=True, help="Rank of the current node")
     args = parser.parse_args()
 
-    # FIXME:ip, port?
     init_method = f"tcp://{args.master_ip}:6585"
     dist.init_process_group(backend='gloo', init_method=init_method, rank=args.rank, world_size=args.num_nodes)
 

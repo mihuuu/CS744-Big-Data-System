@@ -43,7 +43,7 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
         running_loss += loss.item()
         
         if batch_idx % 20 == 0:
-            print(f"Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
+            print(f"Epoch {epoch+1} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
         
         if batch_idx == 0:
             start_time = time.time()
