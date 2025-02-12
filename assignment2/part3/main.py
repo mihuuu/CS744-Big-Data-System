@@ -1,124 +1,129 @@
+import os
 import torch
-import numpy as np
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from torchvision import datasets, transforms
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import model as mdl
-import torch.distributed as dist
-import os
-from torch.utils.data.distributed import DistributedSampler
+import time
+from torch.utils.data import DataLoader
+from argparse import ArgumentParser
 
-device = "cpu"
-torch.set_num_threads(4)
+# Training parameters
+batch_size = 64  # Per node
+SEED = 14
+torch.manual_seed(SEED)
 
-batch_size = 256 # batch for one node
+DEVICE = "cpu"
 
-def setup(rank, world_size):
-    dist.init_process_group(
-        backend='gloo',
-        init_method='env://',
-        rank=rank,
-        world_size=world_size,
-    )
+iteration_times = [0 for _ in range(39)]
 
-def train_model(model, train_loader, optimizer, criterion, epoch):
-    """
-    model (torch.nn.module): The model created to train
-    train_loader (pytorch data loader): Training data loader
-    optimizer (optimizer.*): A instance of some sort of optimizer, usually SGD
-    criterion (nn.CrossEntropyLoss) : Loss function used to train the network
-    epoch (int): Current epoch number
-    """
+# Initialize process group
+def setup(master_ip, rank, world_size):
+    os.environ['MASTER_ADDR'] = master_ip
+    os.environ['MASTER_PORT'] = '12399'
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
 
-    # remember to exit the train loop at end of the epoch
-    running_loss = 0
+def cleanup():
+    dist.destroy_process_group()
+
+def train_model(rank, model, train_loader, optimizer, criterion, epoch, world_size):
+    
+    model.train()
+    running_loss = 0.0
+
     for batch_idx, (data, target) in enumerate(train_loader):
-        # Your code goes here!
+        start = time.time()
+
+        data, target = data.to(DEVICE), target.to(DEVICE)
+
         optimizer.zero_grad()
         outputs = model(data)
+        
         loss = criterion(outputs, target)
         loss.backward()
-
-        # Adjust learning weights
+        
         optimizer.step()
 
-        # Gather data and report
         running_loss += loss.item()
-        if batch_idx % 20 == 0:
-            print(running_loss)
-        break
+
+        end = time.time()
+
+        if batch_idx>0 and batch_idx<40:
+            iteration_times[batch_idx-1] = end-start
+        
+        if batch_idx%20==0 and rank == 0:
+            print(f"Rank {rank} | Epoch {epoch} [{batch_idx}/{len(train_loader)}] - Loss: {running_loss / (batch_idx + 1):.4f}")
 
     return None
 
-def test_model(model, test_loader, criterion):
+def test_model(rank, model, test_loader, criterion):
     model.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for batch_idx, (data, target) in enumerate(test_loader):
-            data, target = data.to(device), target.to(device)
+        for data, target in test_loader:
+            data, target = data.to(DEVICE), target.to(DEVICE)
             output = model(data)
-            test_loss += criterion(output, target)
-            pred = output.max(1, keepdim=True)[1]
+            test_loss += criterion(output, target).item()
+            pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
-
+    
     test_loss /= len(test_loader)
-    print('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-            test_loss, correct, len(test_loader.dataset),
-            100. * correct / len(test_loader.dataset)))
-            
+    if rank == 0:
+        print(f'Test set: Average loss: {test_loss:.4f}, Accuracy: {correct}/{len(test_loader.dataset)} ({100. * correct / len(test_loader.dataset):.0f}%)\n')
 
-def main(rank, world_size):
-    setup(rank, world_size)
+def main(master_ip, rank, world_size):
+
+    setup(master_ip, rank, world_size)
+    
     normalize = transforms.Normalize(mean=[x/255.0 for x in [125.3, 123.0, 113.9]],
-                                std=[x/255.0 for x in [63.0, 62.1, 66.7]])
+                                     std=[x/255.0 for x in [63.0, 62.1, 66.7]])
     transform_train = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
-            ])
-
+    ])
     transform_test = transforms.Compose([
             transforms.ToTensor(),
-            normalize])
-    training_set = datasets.CIFAR10(root="./data", train=True,
-                                                download=True, transform=transform_train)
+            normalize
+    ])
     
-    train_sampler = DistributedSampler(training_set, num_replicas=world_size, rank=rank)
+    training_set = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform_train)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(training_set)
+    train_loader = DataLoader(training_set, sampler=train_sampler, shuffle=False, batch_size=batch_size, num_workers=2, pin_memory=True)
     
-    train_loader = torch.utils.data.DataLoader(training_set,
-                                                    num_workers=2,
-                                                    batch_size=batch_size,
-                                                    sampler=train_sampler,
-                                                    shuffle=False,
-                                                    pin_memory=True)
-    test_set = datasets.CIFAR10(root="./data", train=False,
-                                download=True, transform=transform_test)
-
-    test_loader = torch.utils.data.DataLoader(test_set,
-                                              num_workers=2,
-                                              batch_size=batch_size,
-                                              shuffle=False,
-                                              pin_memory=True)
-    training_criterion = torch.nn.CrossEntropyLoss().to(device)
-
-    model = mdl.VGG11().to(device)
-    model = torch.nn.parallel.DistributedDataParallel(model)
-
-    optimizer = optim.SGD(model.parameters(), lr=0.1,
-                          momentum=0.9, weight_decay=0.0001)
+    test_set = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform_test)
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
     
-    # running training for one epoch
+    model = mdl.VGG11().to(DEVICE)
+    model = nn.parallel.DistributedDataParallel(model)
+    
+    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
+    criterion = nn.CrossEntropyLoss().to(DEVICE)
+    
     for epoch in range(1):
-        train_model(model, train_loader, optimizer, training_criterion, epoch)
-        
+        epoch_start_time = time.time()
+        train_model(rank, model, train_loader, optimizer, criterion, epoch, world_size)
+        test_model(rank, model, test_loader, criterion)
+        epoch_time = time.time() - epoch_start_time
         if rank == 0:
-            test_model(model, test_loader, training_criterion)
+            print(f"Epoch {epoch+1} complete time: {epoch_time:.4f} sec")
+
+    print(f"Average running time for iteration 1-39: {sum(iteration_times)/len(iteration_times)}")
+    
+    cleanup()
 
 if __name__ == "__main__":
-    world_size = 4
-    rank = int(os.environ['RANK'])
-    main(rank, world_size)
-    dist.barrier()
+    parser = ArgumentParser()
+    parser.add_argument('--master-ip', type=str, required=True)
+    parser.add_argument('--num-nodes', type=int, required=True)
+    parser.add_argument('--rank', type=int, required=True)
+
+    args = parser.parse_args()
+    
+    main(args.master_ip, args.rank, args.num_nodes)
+
