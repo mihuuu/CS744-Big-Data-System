@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from argparse import ArgumentParser
 
 # Training parameters
+torch.set_num_threads(4)
 batch_size = 64  # Per node
 SEED = 14
 torch.manual_seed(SEED)
@@ -24,7 +25,8 @@ iteration_times = [0 for _ in range(39)]
 def setup(master_ip, rank, world_size):
     os.environ['MASTER_ADDR'] = master_ip
     os.environ['MASTER_PORT'] = '12399'
-    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+    init_method = f"tcp://{args.master_ip}:12399"
+    dist.init_process_group("gloo", rank=rank, init_method=init_method, world_size=world_size)
 
 def cleanup():
     dist.destroy_process_group()
@@ -126,4 +128,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     main(args.master_ip, args.rank, args.num_nodes)
-
